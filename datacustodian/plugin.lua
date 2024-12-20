@@ -4,7 +4,7 @@ configure operation
    "operation": "configure",
    "base_url": "https://api-kms-v2-preprod.datacustodian.cloud.sap",
    "api_key": "de7becae...88ae6",
-   "secret": "SvU...5"
+   "original_secret": "SvU...5"
 }
 
 import operation
@@ -37,7 +37,21 @@ rotate operation
 
 ]]--
 
-function configure_credentials(api_key, secret, base_url)
+function configure_credentials(api_key, original_secret, base_url)
+  local request_body = json.encode({apiKey = api_key, secret = original_secret})
+  local url = base_url .. '/kms/v2/auth/credentialActivate'
+  local headers = { ['Content-Type'] = 'application/json', ['accept'] = 'application/json'}
+  local response, err = request { method = 'PUT', url = url, headers = headers, body=request_body }
+  if err ~= nil then
+    return {result = nil, error = err}
+  end
+  if response.status ~= 200 then
+    decoded_body = json.decode(response.body)
+    response.body = decoded_body
+    return {result = nil, error = response}
+  end
+  local json_resp = json.decode(response.body);
+  local secret = json_resp['secret']
   local name = Blob.random { bits = 64 }:hex()
   local secret, err = Sobject.import{ name = name, obj_type = 'SECRET', value = Blob.from_bytes(secret), custom_metadata = {['api_key'] = api_key, ['base_url'] = base_url }}
   if secret == nil then
@@ -70,7 +84,9 @@ function login(secret_id)
     return {result = nil, error = err}
   end
   if response.status ~= 200 then
-    return {result = nil, error = json.decode(response.body)}
+    decoded_body = json.decode(response.body)
+    response.body = decoded_body
+    return {result = nil, error = response}
   end
   return {result = json.decode(response.body).accessToken, error = nil}
 end
@@ -86,6 +102,8 @@ function config_kek_key(headers, base_url, kek_key_id, kek_key_version, is_trans
     return {result = nil, kek_id = nil, error = err}
   end
   if response.status ~= 200 then
+    decoded_body = json.decode(response.body)
+    response.body = decoded_body
     return {result = nil, kek_id = nil, error = response}
   end
   local json_resp = json.decode(response.body)
@@ -221,6 +239,8 @@ function perform_byok(headers, base_url, wrapped_key_value, input)
     return {result = nil, error = err}
   end
   if response.status ~= 200 then
+    decoded_body = json.decode(response.body)
+    response.body = decoded_body
     return {result = nil, error = response}
   end
 
@@ -260,8 +280,8 @@ function check(input)
     if input.api_key == nil then
       return nil, 'input parameter api_key required'
     end
-    if input.secret == nil then
-      return nil, 'input parameter secret required'
+    if input.original_secret == nil then
+      return nil, 'input parameter original secret required'
     end
     if input.base_url == nil then
       return nil, 'input parameter base_url required'
@@ -316,7 +336,7 @@ function run(input)
   end
 
   if input.operation == 'configure' then
-    return configure_credentials(input.api_key, input.secret, input.base_url)
+    return configure_credentials(input.api_key, input.original_secret, input.base_url)
   else
     local resp, err, message = login(input.secret_id)
     if resp.result == nil then
